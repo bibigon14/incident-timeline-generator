@@ -27,6 +27,17 @@ draft so the human can focus on root cause and lessons.
 The automation stops at the mechanical step. Root cause analysis and
 lessons stay human - the tool just removes the typing.
 
+## Live demo
+
+![itg running against inference-slo-stack git history, 8 commits captured into a Markdown post-mortem skeleton](docs/screenshots/itg-live-run.png)
+
+Real run against the git history of the sibling
+[inference-slo-stack](https://github.com/bibigon14/inference-slo-stack)
+repo over the window of its two production incidents (2026-10-27 vmalert
+CrashLoopBackOff, 2026-10-29 post-reboot CNI cascade). Eight commits
+captured into a merged Markdown table, Root cause / Lessons / Follow-up
+left blank for the human. The tool stops where the typing stops.
+
 ## Install
 
 ```bash
