@@ -1,5 +1,9 @@
 # incident-timeline-generator
 
+[![ci](https://github.com/bibigon14/incident-timeline-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/bibigon14/incident-timeline-generator/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bibigon14/incident-timeline-generator)](https://goreportcard.com/report/github.com/bibigon14/incident-timeline-generator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Generates a Markdown post-mortem skeleton from the raw signals you already
 have during an incident: Kubernetes events, Prometheus alerts, and git
 commits. Takes a time window, pulls from each source, merges by timestamp,
