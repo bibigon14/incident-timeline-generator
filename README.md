@@ -1,31 +1,35 @@
 # incident-timeline-generator
 
 [![ci](https://github.com/bibigon14/incident-timeline-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/bibigon14/incident-timeline-generator/actions/workflows/ci.yml)
+[![release](https://github.com/bibigon14/incident-timeline-generator/actions/workflows/release.yml/badge.svg)](https://github.com/bibigon14/incident-timeline-generator/actions/workflows/release.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bibigon14/incident-timeline-generator)](https://goreportcard.com/report/github.com/bibigon14/incident-timeline-generator)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Generates a Markdown post-mortem skeleton from the raw signals you already
-have during an incident: Kubernetes events, Prometheus alerts, and git
-commits. Takes a time window, pulls from each source, merges by timestamp,
-renders into the standard post-mortem shape you'd otherwise type by hand.
+have during an incident: Kubernetes events, Prometheus alerts, git
+commits, and systemd journal entries. Takes a time window, pulls from
+each source, merges by timestamp, renders into the standard post-mortem
+shape you'd otherwise type by hand.
 
 Built because I noticed I was reconstructing incident timelines manually
 across two production post-mortems last week - the same mechanical
 assembly of "kubectl events sorted by time" + "prometheus alerts fired"
-+ "git commits deployed around the window". This tool does the first
-draft so the human can focus on root cause and lessons.
++ "git commits deployed around the window" + "grep through journalctl".
+This tool does the first draft so the human can focus on root cause and
+lessons.
 
 ## What it does
 
 ```
-   kubectl events ─┐
-                   │
-   prometheus      ├─► merge by timestamp ─► markdown skeleton
-   alerts          │                           - Summary (empty)
-                   │                           - Timeline table (populated)
-   git commits ────┘                           - Root cause (empty)
-                                               - Lessons (empty)
-                                               - Follow-up (empty)
+   kubectl events ──┐
+                    │
+   prometheus       │
+   alerts           ├─► merge by timestamp ─► markdown skeleton
+                    │                           - Summary (empty)
+   git commits      │                           - Timeline table (populated)
+                    │                           - Root cause (empty)
+   journalctl ──────┘                           - Lessons (empty)
+                                                - Follow-up (empty)
 ```
 
 The automation stops at the mechanical step. Root cause analysis and
@@ -44,6 +48,22 @@ left blank for the human. The tool stops where the typing stops.
 
 ## Install
 
+### Pre-built binary (recommended)
+
+Download from the [latest release](https://github.com/bibigon14/incident-timeline-generator/releases/latest)
+for your platform (linux/darwin, amd64/arm64):
+
+```bash
+# Example for linux/amd64 - replace in URL for your platform
+VERSION=0.2.0
+curl -sSL "https://github.com/bibigon14/incident-timeline-generator/releases/download/v${VERSION}/itg_${VERSION}_linux_x86_64.tar.gz" \
+  | tar xz -C /tmp
+sudo install -m 0755 /tmp/itg /usr/local/bin/itg
+itg -version
+```
+
+### From source
+
 ```bash
 go install github.com/bibigon14/incident-timeline-generator/cmd/itg@latest
 ```
@@ -60,27 +80,26 @@ make build
 
 ```bash
 itg \
-  --since "2026-10-27 22:00" \
-  --until "2026-10-28 00:30" \
+  --since "2026-10-29 03:00" \
+  --until "2026-10-29 06:00" \
   --kubectl-namespace vm \
   --prometheus-url http://localhost:8429 \
   --git-repo ~/git/inference-slo-stack \
-  --title "vmalert CrashLoopBackOff" \
+  --journalctl --journalctl-unit "k3s,containerd" --journalctl-priority 4 \
+  --title "post-reboot CNI cascade" \
   --severity SEV-3 \
-  --output docs/incidents/2026-10-27-vmalert-crashloop.md
+  --output docs/incidents/2026-10-29-post-reboot-cni-cascade.md
 ```
 
 What this does:
 
-1. Runs `kubectl -n vm get events --sort-by=.lastTimestamp` and filters
-   to events within the window
-2. Queries `prometheus-url/api/v1/alerts` and
-   `prometheus-url/api/v1/query_range` for ALERTS in the window
-3. Runs `git -C <repo> log --since=... --until=... --format=...` and
-   collects commits (including the one that likely triggered)
-4. Sorts all three by timestamp into a unified table
-5. Renders the markdown with a header pre-filled, the timeline populated,
-   and headings waiting for your words in Root cause / Lessons / Follow-up
+1. Runs `kubectl -n vm get events` and filters to the window
+2. Queries `prometheus-url/api/v1/query_range` for `ALERTS{alertstate="firing"}` transitions
+3. Runs `git -C <repo> log --since=... --until=...` for commits in the window
+4. Runs `journalctl -o json --since=... --until=... --unit=k3s --unit=containerd --priority=4`
+5. Merges all four by timestamp and renders markdown with a header
+   pre-filled, the timeline populated, and Root cause / Lessons /
+   Follow-up left blank for the human
 
 ## Sources
 
@@ -90,13 +109,14 @@ and skips the rest.
 | Source | Flag | What it ingests |
 |--------|------|------------------|
 | Kubernetes events | `--kubectl-namespace` (or `--all-namespaces`) | `kubectl get events` for the window |
-| Prometheus alerts | `--prometheus-url` | ALERTS metric for `firing` state transitions |
-| git commits | `--git-repo` | commits in the window on the default branch |
+| Prometheus alerts | `--prometheus-url` | `ALERTS{alertstate="firing"}` transitions via `/api/v1/query_range` |
+| git commits | `--git-repo` | commits in the window across all branches |
+| systemd journal | `--journalctl` | `journalctl -o json` on the local host, optional unit / priority filter |
 
-Future ingesters planned for v0.2:
+Future ingesters planned for v0.3:
 - Loki log excerpts around critical events
 - Grafana dashboard snapshots (via API)
-- `journalctl` for host-level events on single-node clusters
+- Prometheus bearer-token auth
 
 ## Output template
 
@@ -154,10 +174,11 @@ rendered skeleton from the 2026-10-27 vmalert incident.
 
 ## Status
 
-v0.1 - working MVP. All three ingesters functional, markdown output
-usable as-is. Known gaps:
-- No log excerpt ingester yet (coming v0.2)
-- Prometheus auth not supported (bearer token only in v0.2)
+v0.2 - four working ingesters (kubectl, prometheus, git, journalctl),
+cross-platform binaries published via goreleaser (linux/darwin,
+amd64/arm64). Known gaps:
+- No log excerpt ingester yet (coming v0.3)
+- Prometheus auth not supported (bearer token only in v0.3)
 - Hardcoded to GET events; no watch mode
 
 ## License
