@@ -1,7 +1,8 @@
 // Command itg generates a Markdown post-mortem skeleton by merging
-// Kubernetes events, Prometheus alerts, and git commits for a given
-// time window. The automation stops at the mechanical assembly step -
-// root cause analysis and lessons remain human.
+// Kubernetes events, Prometheus alerts, git commits, and systemd
+// journalctl entries for a given time window. The automation stops at
+// the mechanical assembly step - root cause analysis and lessons
+// remain human.
 package main
 
 import (
@@ -19,17 +20,24 @@ import (
 
 const timeLayout = "2006-01-02 15:04"
 
+// version is injected at build time via -ldflags "-X main.version=...".
+// Default "dev" lets `go install` / `go run` work without goreleaser.
+var version = "dev"
+
 type config struct {
-	since     string
-	until     string
-	title     string
-	severity  string
-	author    string
-	namespace string
-	allNS     bool
-	promURL   string
-	gitRepo   string
-	output    string
+	since           string
+	until           string
+	title           string
+	severity        string
+	author          string
+	namespace       string
+	allNS           bool
+	promURL         string
+	gitRepo         string
+	output          string
+	journal         bool
+	journalUnits    string
+	journalPriority int
 }
 
 func main() {
@@ -88,6 +96,28 @@ func main() {
 		}
 	}
 
+	// Ingest journalctl entries if enabled.
+	if cfg.journal {
+		var units []string
+		if cfg.journalUnits != "" {
+			for _, u := range strings.Split(cfg.journalUnits, ",") {
+				if u = strings.TrimSpace(u); u != "" {
+					units = append(units, u)
+				}
+			}
+		}
+		opts := sources.JournalOptions{
+			Units:       units,
+			MaxPriority: cfg.journalPriority,
+		}
+		journalEvents, err := sources.FetchJournalEntries(sinceT, untilT, opts)
+		if err != nil {
+			warn("journalctl: %v (continuing without them)", err)
+		} else {
+			events = append(events, journalEvents...)
+		}
+	}
+
 	if len(events) == 0 {
 		die("no events found from any source in [%s, %s]", cfg.since, cfg.until)
 	}
@@ -117,6 +147,7 @@ func main() {
 
 func parseFlags() config {
 	var cfg config
+	printVersion := flag.Bool("version", false, "print version and exit")
 	flag.StringVar(&cfg.since, "since", "", "window start, format: "+timeLayout+" (local time)")
 	flag.StringVar(&cfg.until, "until", "", "window end, format: "+timeLayout+" (local time)")
 	flag.StringVar(&cfg.title, "title", "Untitled incident", "incident title for the post-mortem header")
@@ -126,16 +157,24 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.allNS, "all-namespaces", false, "pull kubectl events across all namespaces")
 	flag.StringVar(&cfg.promURL, "prometheus-url", "", "prometheus base URL (http://host:port)")
 	flag.StringVar(&cfg.gitRepo, "git-repo", "", "path to a git repo to pull commits from")
+	flag.BoolVar(&cfg.journal, "journalctl", false, "pull entries from systemd journalctl on this host")
+	flag.StringVar(&cfg.journalUnits, "journalctl-unit", "", "optional comma-separated systemd units to filter (e.g. \"k3s,containerd\")")
+	flag.IntVar(&cfg.journalPriority, "journalctl-priority", -1, "optional max syslog priority 0..7 (RFC 5424); -1 = no filter")
 	flag.StringVar(&cfg.output, "output", "-", "output file path, or '-' for stdout")
 	flag.Parse()
+
+	if *printVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	if cfg.since == "" || cfg.until == "" {
 		fmt.Fprintln(os.Stderr, "both --since and --until are required")
 		flag.Usage()
 		os.Exit(2)
 	}
-	if cfg.namespace == "" && !cfg.allNS && cfg.promURL == "" && cfg.gitRepo == "" {
-		fmt.Fprintln(os.Stderr, "give at least one source: --kubectl-namespace / --all-namespaces / --prometheus-url / --git-repo")
+	if cfg.namespace == "" && !cfg.allNS && cfg.promURL == "" && cfg.gitRepo == "" && !cfg.journal {
+		fmt.Fprintln(os.Stderr, "give at least one source: --kubectl-namespace / --all-namespaces / --prometheus-url / --git-repo / --journalctl")
 		os.Exit(2)
 	}
 	return cfg
