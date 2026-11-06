@@ -160,7 +160,10 @@ because that's the shape I was tired of typing:
 ```
 
 See [examples/sample-output.md](examples/sample-output.md) for a real
-rendered skeleton from the 2026-10-27 vmalert incident.
+rendered skeleton from the 2026-10-27 vmalert incident, and
+[examples/live-oci-dogfood.md](examples/live-oci-dogfood.md) for a
+verbatim dump of a live v0.2.0 run on the OCI Ampere A1 VM (145 events
+across 4 sources).
 
 ## Why not <existing tool>
 
